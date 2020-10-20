@@ -6,6 +6,9 @@ verify_ssl = true
 [dev-packages]
 
 [packages]
+pyqt5-stubs = "==5.14.2.2"
+pyqt5 = "*"
+pandas = "*"
 
 [requires]
 python_version = "3.6"
