@@ -91,7 +91,7 @@ class SWDMain(QMainWindow):
                                         else:
                                             dict_data[name] = data[index]
                                     self.table = self.table.append(dict_data, ignore_index=True)
-                    self.create_table_ui()
+            self.create_table_ui()
 
     def create_table_ui(self):
         self.table_ui.setRowCount(len(self.table.index))
