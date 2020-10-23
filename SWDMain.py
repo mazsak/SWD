@@ -1,5 +1,6 @@
 from typing import List, Dict
 
+import numpy as np
 import pandas as pd
 from PyQt5.QtWidgets import QMainWindow, QAction, QFileDialog, QMenuBar, QInputDialog, QTableWidget, QTableWidgetItem
 
@@ -19,6 +20,7 @@ class SWDMain(QMainWindow):
 
         self.file_name: str = ''
         self.table: pd.DataFrame = pd.DataFrame()
+        self.basic_table: pd.DataFrame = pd.DataFrame()
         self.table_ui: QTableWidget = QTableWidget()
 
         self.init_ui()
@@ -36,12 +38,13 @@ class SWDMain(QMainWindow):
         self.table_ui.move(0, 20)
 
     def default_settings(self):
-        self.setGeometry(300, 300, 300, 200)
+        self.showMaximized()
         self.setWindowTitle('SWD')
 
     def init_menu_bar(self) -> None:
         self.init_file()
         self.init_update()
+        self.init_action()
 
     def init_file(self) -> None:
         load_file: QAction = QAction('Open file', self)
@@ -49,15 +52,26 @@ class SWDMain(QMainWindow):
         load_file.setStatusTip('Loading file')
         load_file.triggered.connect(self.load_file_action)
 
+        reload_file: QAction = QAction('Reload file', self)
+        reload_file.setShortcut('Ctrl+R')
+        reload_file.setStatusTip('Reloading file')
+        reload_file.triggered.connect(self.reload_file_action)
+
         self.statusBar()
 
         menu_bar: QMenuBar = self.menuBar()
         file_menu = menu_bar.addMenu('&File')
         file_menu.addAction(load_file)
+        file_menu.addAction(reload_file)
+
+    def reload_file_action(self):
+        self.table = self.basic_table.copy()
+        self.create_table_ui()
 
     def load_file_action(self):
         file_name, _ = QFileDialog.getOpenFileName()
         if file_name:
+            self.table = pd.DataFrame()
             self.file_name: str = file_name
             if self.file_name.endswith('.csv'):
                 self.table = pd.read_csv(self.file_name)
@@ -91,6 +105,7 @@ class SWDMain(QMainWindow):
                                         else:
                                             dict_data[name] = data[index]
                                     self.table = self.table.append(dict_data, ignore_index=True)
+            self.basic_table = self.table.copy()
             self.create_table_ui()
 
     def create_table_ui(self):
@@ -116,15 +131,15 @@ class SWDMain(QMainWindow):
 
     def change_text_to_digit_action(self):
         column, ok = QInputDialog.getItem(self, 'Update', "Choose column",
-                             [f'{column}, {type}' for column in self.table.select_dtypes(['object', 'string']).columns
-                              for type in ['alphabetically', 'order of appearance']])
+                                          [f'{column}, {type}' for column in
+                                           self.table.select_dtypes(['object', 'string']).columns
+                                           for type in ['alphabetically', 'order of appearance']])
         encoder = 0
         if column.endswith('order of appearance'):
             encoder = 1
         if ok:
-            self.label_encoding(column.split(',')[0],encoder)
+            self.label_encoding(column.split(',')[0], encoder)
             self.create_table_ui()
-
 
     def label_encoding(self, column_name, encoding_type):
         if encoding_type % 2 == 0:
@@ -137,3 +152,61 @@ class SWDMain(QMainWindow):
             values: List[str] = list(set(self.table[column_name].values))
             encoded_values = {x: i for i, x in enumerate(values)}
             self.table[column_name] = self.table[column_name].map(encoded_values)
+
+    def init_action(self):
+        binning: QAction = QAction('Binning', self)
+        binning.setShortcut('Ctrl+B')
+        binning.setStatusTip('Binning data')
+        binning.triggered.connect(self.binning_action)
+
+        normalization: QAction = QAction('Normalization', self)
+        normalization.setShortcut('Ctrl+N')
+        normalization.setStatusTip('Normalize data')
+        normalization.triggered.connect(self.normalization_action)
+
+        interpolate: QAction = QAction('Interpolate', self)
+        interpolate.setShortcut('Ctrl+I')
+        interpolate.setStatusTip('Interpolate data')
+        interpolate.triggered.connect(self.interpolate_action)
+
+        self.statusBar()
+
+        menu_bar: QMenuBar = self.menuBar()
+        action = menu_bar.addMenu('&Action')
+        action.addAction(binning)
+        action.addAction(normalization)
+        action.addAction(interpolate)
+
+    def binning_action(self):
+        column, ok = QInputDialog.getItem(self, 'Binning', "Choose column",
+                                          [f'{column}' for column in
+                                           self.table.select_dtypes(['float']).columns])
+        if ok:
+            bins_amount, ok_amount = QInputDialog.getInt(self, 'Binning', "Enter amount of bins")
+            if ok_amount:
+                self.table[f'{column}_binned'] = pd.cut(self.table[column], bins=bins_amount)
+        self.create_table_ui()
+
+    def normalization_action(self):
+        column, ok = QInputDialog.getItem(self, 'Binning', "Choose column",
+                                          [f'{column}' for column in
+                                           self.table.select_dtypes(['float']).columns])
+        if ok:
+            self.table[f'{column}_normalization'] = (
+                    (self.table[column] - self.table[column].mean()) / self.table[column].std()).round(5)
+        self.create_table_ui()
+
+    def interpolate_action(self):
+        column, ok = QInputDialog.getItem(self, 'Interpolate', "Choose column",
+                                          [f'{column}' for column in
+                                           self.table.select_dtypes(['float']).columns])
+        if ok:
+            a, ok_a = QInputDialog.getInt(self, 'Left range', "Enter beginning of range")
+            if ok_a:
+                b, ok_b = QInputDialog.getInt(self, 'Right range', "Enter end of range")
+                if ok_b:
+                    self.table[f'{column}_interpolated'] = self.table[column].apply(
+                        lambda x: np.interp(x, [self.table[column].min(), self.table[column].max()], [a, b])).round(5)
+        self.create_table_ui()
+
+    # np.interp(liczba,przedział_nasz,przedział_użytkownika)

@@ -9,6 +9,7 @@ verify_ssl = true
 pyqt5-stubs = "==5.14.2.2"
 pyqt5 = "*"
 pandas = "*"
+matplotlib = "*"
 
 [requires]
 python_version = "3.6"
