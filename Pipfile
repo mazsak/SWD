@@ -11,6 +11,7 @@ pyqt5 = "*"
 pandas = "*"
 matplotlib = "*"
 xlrd = "*"
+scipy = "*"
 
 [requires]
 python_version = "3.6"

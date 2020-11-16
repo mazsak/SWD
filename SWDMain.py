@@ -1,3 +1,5 @@
+import math
+from collections import Counter
 from typing import List, Dict
 
 import matplotlib
@@ -53,6 +55,7 @@ class SWDMain(QMainWindow):
         self.init_update()
         self.init_action()
         self.init_plots()
+        self.init_classifier()
 
     def init_file(self) -> None:
         load_file: QAction = QAction('Open file', self)
@@ -261,7 +264,7 @@ class SWDMain(QMainWindow):
                     for row in df_max.index:
                         self.max_table.setItem(row, index, QTableWidgetItem(str(df_max.at[row, column])))
                 self.max_table.move(0, 0)
-                self.max_table.setWindowTitle(f'Max table({100 - percent}%)')
+                self.max_table.setWindowTitle(f'Max table({percent}%)')
                 self.max_table.show()
 
     def init_plots(self) -> None:
@@ -369,3 +372,120 @@ class SWDMain(QMainWindow):
                     counts, bins, patches = ax.hist(self.table[x], edgecolor='gray')
                 plt.xticks(rotation='vertical')
                 plt.show()
+
+    def init_classifier(self):
+        knn: QAction = QAction('KNN', self)
+        knn.setShortcut('Ctrl+K')
+        knn.setStatusTip('Exercise KNN')
+        knn.triggered.connect(self.knn_action)
+
+        knn_leave_one_out: QAction = QAction('KNN leave-one-out', self)
+        knn_leave_one_out.setShortcut('Ctrl+L')
+        knn_leave_one_out.setStatusTip('Exercise KNN leave-one-out')
+        knn_leave_one_out.triggered.connect(self.knn_leave_one_out_action)
+
+        self.statusBar()
+
+        menu_bar: QMenuBar = self.menuBar()
+        classifier_menu = menu_bar.addMenu('&Classifier')
+        classifier_menu.addAction(knn)
+        classifier_menu.addAction(knn_leave_one_out)
+
+    def knn_action(self):
+        class_name, ok = QInputDialog.getItem(self, 'Classifier KNN', "Choose class column",
+                                              [f'{column}' for column in
+                                               self.table.columns])
+        if ok:
+            k, ok_k = QInputDialog.getInt(self, 'Classifier KNN', "Enter k")
+            if ok_k:
+                metric, ok_metric = QInputDialog.getItem(self, 'Classifier KNN', "Choose metric",
+                                                         ['Euclidean', 'Manhattan', 'Chebyshev', 'Mahalanobis'])
+
+                go = True
+                row = {}
+                for name in self.table.columns.tolist():
+                    if name != class_name:
+                        if self.table[name].dtypes in ['float', 'int']:
+                            data, ok_data = QInputDialog.getDouble(self, 'Data', f'Enter {name} column')
+                            if not ok_data:
+                                go = False
+                                break
+                            else:
+                                row[name] = data
+                        else:
+                            data, ok_data = QInputDialog.getText(self, 'Data', f'Enter {name} column')
+                            if not ok_data:
+                                go = False
+                                break
+                            else:
+                                row[name] = data
+
+                if go:
+                    if ok_metric:
+                        y = self.__calculate_distance(k, metric, class_name, row, self.table)
+                        QMessageBox.information(self, 'KNN Classification',
+                                                f'The item has been classified using {metric} metric as {y} for parameters k={k}, class={class_name}, row_info={row}',
+                                                QMessageBox.Ok)
+
+    def __calculate_distance(self, k, metric, class_name, new_row, data):
+        if metric == 'Euclidean':
+            distance = [{'distance': math.sqrt(
+                sum([math.pow(row[column_name] - new_row[column_name], 2) for column_name in data.columns.tolist()
+                     if
+                     column_name != class_name])), 'y': row[class_name]} for
+                row in data.iloc]
+        elif metric == 'Manhattan':
+            distance = [{'distance':
+                             sum([abs(row[column_name] - new_row[column_name]) for column_name in
+                                  data.columns.tolist()
+                                  if
+                                  column_name != class_name]), 'y': row[class_name]} for
+                        row in data.iloc]
+        elif metric == 'Chebyshev':
+            distance = [{'distance': max(
+                [abs(row[column_name] - new_row[column_name]) for column_name in data.columns.tolist()
+                 if
+                 column_name != class_name]), 'y': row[class_name]} for
+                row in data.iloc]
+        elif metric == 'Mahalanobis':
+            columns = data.columns.tolist()
+            columns.remove(class_name)
+            cov = data[columns].cov().to_numpy()
+            inv_covmat = np.linalg.inv(cov)
+            distance = [{'distance': np.subtract(np.array(list(new_row.values())), np.array(
+                [row[name_column] for name_column in data.columns.tolist() if name_column != class_name])).T.dot(
+                inv_covmat).dot(np.subtract(np.array(list(new_row.values())), np.array(
+                [row[name_column] for name_column in data.columns.tolist() if name_column != class_name]))),
+                         'y': row[class_name]} for row in data.iloc]
+        distance.sort(key=lambda x: x['distance'])
+        closest = distance[0: min(k, len(distance))]
+        counter = Counter([x['y'] for x in closest])
+        y = counter.most_common(1)
+
+        return y[0][0]
+
+    def knn_leave_one_out_action(self):
+        class_name, ok = QInputDialog.getItem(self, 'Classifier KNN leave-one-out', "Choose class column",
+                                              [f'{column}' for column in
+                                               self.table.columns])
+        if ok:
+            k, ok_k = QInputDialog.getInt(self, 'Classifier KNN leave-one-out', "Enter k")
+            if ok_k:
+                metric, ok_metric = QInputDialog.getItem(self, 'Classifier KNN leave-one-out', "Choose metric",
+                                                         ['Euclidean', 'Manhattan', 'Chebyshev', 'Mahalanobis'])
+                if ok_metric:
+                    results = [{'correct_class': row[class_name],
+                                'predicted_class': self.__calculate_distance(k, metric, class_name,
+                                                                             {column_name: row[column_name] for
+                                                                              column_name in self.table.columns.tolist()
+                                                                              if column_name != class_name},
+                                                                             self.table.copy().drop([row.name]))} for
+                               row in self.table.iloc]
+                    correct = 0
+                    for row in results:
+                        if row['correct_class'] == row['predicted_class']:
+                            correct+=1
+
+                    QMessageBox.information(self, 'KNN Classification leave-one-out',
+                                            f'Quality of KNN classification using {metric} metric with k={k}, class={class_name}: {correct}/{len(results)} - {round(correct/len(results)*100,2)}%',
+                                            QMessageBox.Ok)
