@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PyQt5.QtWidgets import QMainWindow, QAction, QFileDialog, QMenuBar, QInputDialog, QTableWidget, QTableWidgetItem, \
-    QMessageBox
+    QMessageBox, QProgressBar
+from numpy.linalg import LinAlgError
 
 matplotlib.use('Qt5Agg')
 
@@ -29,6 +30,7 @@ class SWDMain(QMainWindow):
         self.table: pd.DataFrame = pd.DataFrame()
         self.basic_table: pd.DataFrame = pd.DataFrame()
         self.table_ui: QTableWidget = QTableWidget()
+        self.figure_counter = 0
 
         self.init_ui()
 
@@ -384,12 +386,18 @@ class SWDMain(QMainWindow):
         knn_leave_one_out.setStatusTip('Exercise KNN leave-one-out')
         knn_leave_one_out.triggered.connect(self.knn_leave_one_out_action)
 
+        knn_leave_one_out_all: QAction = QAction('KNN leave-one-out for all k and metrics', self)
+        knn_leave_one_out_all.setShortcut('Ctrl+A')
+        knn_leave_one_out_all.setStatusTip('Exercise KNN leave-one-out for all k and metrics')
+        knn_leave_one_out_all.triggered.connect(self.knn_leave_one_out_all_action)
+
         self.statusBar()
 
         menu_bar: QMenuBar = self.menuBar()
         classifier_menu = menu_bar.addMenu('&Classifier')
         classifier_menu.addAction(knn)
         classifier_menu.addAction(knn_leave_one_out)
+        classifier_menu.addAction(knn_leave_one_out_all)
 
     def knn_action(self):
         class_name, ok = QInputDialog.getItem(self, 'Classifier KNN', "Choose class column",
@@ -428,6 +436,12 @@ class SWDMain(QMainWindow):
                                                 QMessageBox.Ok)
 
     def __calculate_distance(self, k, metric, class_name, new_row, data):
+        for column in data.select_dtypes(['object', 'string']).columns:
+            if column != class_name:
+                values: List[str] = list(set(data[column].values))
+                encoded_values = {x: i for i, x in enumerate(values)}
+                data[column] = data[column].map(encoded_values)
+
         if metric == 'Euclidean':
             distance = [{'distance': math.sqrt(
                 sum([math.pow(row[column_name] - new_row[column_name], 2) for column_name in data.columns.tolist()
@@ -465,27 +479,254 @@ class SWDMain(QMainWindow):
         return y[0][0]
 
     def knn_leave_one_out_action(self):
+        data = self.basic_table.copy()
         class_name, ok = QInputDialog.getItem(self, 'Classifier KNN leave-one-out', "Choose class column",
                                               [f'{column}' for column in
-                                               self.table.columns])
+                                               data.columns])
         if ok:
             k, ok_k = QInputDialog.getInt(self, 'Classifier KNN leave-one-out', "Enter k")
             if ok_k:
                 metric, ok_metric = QInputDialog.getItem(self, 'Classifier KNN leave-one-out', "Choose metric",
                                                          ['Euclidean', 'Manhattan', 'Chebyshev', 'Mahalanobis'])
                 if ok_metric:
-                    results = [{'correct_class': row[class_name],
-                                'predicted_class': self.__calculate_distance(k, metric, class_name,
-                                                                             {column_name: row[column_name] for
-                                                                              column_name in self.table.columns.tolist()
-                                                                              if column_name != class_name},
-                                                                             self.table.copy().drop([row.name]))} for
-                               row in self.table.iloc]
+                    normalization = QMessageBox.question(self, 'Normalization', 'Should the dataset be normalized?',
+                                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                    if normalization == QMessageBox.Yes:
+                        for column in data.select_dtypes(['float', 'int']).columns:
+                            data[column] = ((data[column] - data[column].mean()) / self.table[column].std()).round(5)
+                    for column in data.select_dtypes(['object', 'string']).columns:
+                        if column != class_name:
+                            values: List[str] = list(set(data[column].values))
+                            encoded_values = {x: i for i, x in enumerate(values)}
+                            data[column] = data[column].map(encoded_values)
+                    results = []
+                    columns = data.columns.tolist()
+                    columns.remove(class_name)
+                    if metric == 'Mahalanobis':
+                        cov = data[columns].cov().to_numpy()
+                        inv_covmat = np.linalg.inv(cov)
+                    amount = math.pow(len(data.index.tolist()), 2) + len(data.index.tolist())
+                    all = amount
+                    pbar = QProgressBar(self)
+                    pbar.setGeometry(550, 385, 100, 30)
+                    pbar.setMinimum(0)
+                    pbar.setMaximum(all)
+                    pbar.show()
+                    for index, row in enumerate(data.iloc):
+                        results_row = []
+                        for index_second, column in enumerate(data.iloc):
+                            if index_second <= index:
+                                if metric == 'Euclidean':
+                                    results_row.append({
+                                        'distance': math.sqrt(
+                                            sum([
+                                                math.pow(row[column_name] - column[column_name], 2)
+                                                for column_name in columns
+                                            ])),
+                                        'class_row': row[class_name],
+                                        'class_column': column[class_name]
+                                    })
+                                elif metric == 'Manhattan':
+                                    results_row.append({
+                                        'distance': sum([
+                                            abs(row[column_name] - column[column_name])
+                                            for column_name in columns
+                                        ]),
+                                        'class_row': row[class_name],
+                                        'class_column': column[class_name]
+                                    })
+                                elif metric == 'Chebyshev':
+                                    results_row.append({
+                                        'distance': max([
+                                            abs(row[column_name] - column[column_name])
+                                            for column_name in columns
+                                        ]),
+                                        'class_row': row[class_name],
+                                        'class_column': column[class_name]
+                                    })
+                                elif metric == 'Mahalanobis':
+                                    results_row.append({
+                                        'distance': np.subtract(
+                                            np.array([
+                                                column[name_column]
+                                                for name_column in columns
+                                            ]),
+                                            np.array([
+                                                row[name_column]
+                                                for name_column in columns
+                                            ]))
+                                            .T.dot(inv_covmat)
+                                            .dot(
+                                            np.subtract(
+                                                np.array([
+                                                    column[name_column]
+                                                    for name_column in columns
+                                                ]),
+                                                np.array([
+                                                    row[name_column]
+                                                    for name_column in columns
+                                                ]))),
+                                        'class_row': row[class_name],
+                                        'class_column': column[class_name]
+                                    })
+                                pbar.setValue((all - amount))
+                                amount -= 1
+                            else:
+                                pbar.setValue((all - amount))
+                                amount -= 1
+                                continue
+                        results.append(results_row)
+
                     correct = 0
-                    for row in results:
-                        if row['correct_class'] == row['predicted_class']:
-                            correct+=1
+                    for index, row in enumerate(results):
+                        if len(row) == 1:
+                            distance = []
+                        else:
+                            distance = row[:-1]
+                        distance.extend([d[index] for i, d in enumerate(results) if i > index])
+                        distance.sort(key=lambda x: x['distance'])
+                        closest = distance[0: min(k, len(distance))]
+                        counter = Counter([x['class_row'] for x in closest])
+                        y = counter.most_common(1)
+
+                        if y[0][0] == data.iloc[index][class_name]:
+                            correct += 1
+                        pbar.setValue((all - amount))
+                        amount -= 1
+                    pbar.hide()
 
                     QMessageBox.information(self, 'KNN Classification leave-one-out',
-                                            f'Quality of KNN classification using {metric} metric with k={k}, class={class_name}: {correct}/{len(results)} - {round(correct/len(results)*100,2)}%',
+                                            f'Quality of KNN classification using {metric} metric with k={k}, class={class_name}: {correct}/{len(results)} - {round(correct / len(results) * 100, 2)}%',
                                             QMessageBox.Ok)
+
+    def knn_leave_one_out_all_action(self):
+        class_name, ok = QInputDialog.getItem(self, 'Classifier KNN leave-one-out', "Choose class column",
+                                              [f'{column}' for column in
+                                               self.table.columns])
+        if ok:
+            data = self.basic_table.copy()
+            normalization = QMessageBox.question(self, 'Normalization', 'Should the dataset be normalized?',
+                                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if normalization == QMessageBox.Yes:
+                for column in data.select_dtypes(['float', 'int']).columns:
+                    data[column] = ((data[column] - data[column].mean()) / self.table[column].std()).round(5)
+            for column in data.select_dtypes(['object', 'string']).columns:
+                if column != class_name:
+                    values: List[str] = list(set(data[column].values))
+                    encoded_values = {x: i for i, x in enumerate(values)}
+                    data[column] = data[column].map(encoded_values)
+            results = []
+            columns = data.columns.tolist()
+            columns.remove(class_name)
+            cov = data[columns].cov().to_numpy()
+            try:
+                inv_covmat = np.linalg.inv(cov)
+            except LinAlgError:
+                inv_covmat = cov
+            amount = math.pow(len(data.index.tolist()), 2) * 2
+            all = amount
+            pbar = QProgressBar(self)
+            pbar.setGeometry(550, 385, 100, 30)
+            pbar.setMinimum(0)
+            pbar.setMaximum(all)
+            pbar.show()
+            for index, row in enumerate(data.iloc):
+                results_row = {
+                    'Euclidean': [],
+                    'Manhattan': [],
+                    'Chebyshev': [],
+                    'Mahalanobis': []
+                }
+                for index_second, column in enumerate(data.iloc):
+                    if index_second <= index:
+                        results_row['Euclidean'].append({
+                            'distance': math.sqrt(
+                                sum([
+                                    math.pow(row[column_name] - column[column_name], 2)
+                                    for column_name in columns
+                                ])),
+                            'class_row': row[class_name],
+                            'class_column': column[class_name]
+                        })
+                        results_row['Manhattan'].append({
+                            'distance': sum([
+                                abs(row[column_name] - column[column_name])
+                                for column_name in columns
+                            ]),
+                            'class_row': row[class_name],
+                            'class_column': column[class_name]
+                        })
+                        results_row['Chebyshev'].append({
+                            'distance': max([
+                                abs(row[column_name] - column[column_name])
+                                for column_name in columns
+                            ]),
+                            'class_row': row[class_name],
+                            'class_column': column[class_name]
+                        })
+                        results_row['Mahalanobis'].append({
+                            'distance': np.subtract(
+                                np.array([
+                                    column[name_column]
+                                    for name_column in columns
+                                ]),
+                                np.array([
+                                    row[name_column]
+                                    for name_column in columns
+                                ]))
+                                .T.dot(inv_covmat)
+                                .dot(
+                                np.subtract(
+                                    np.array([
+                                        column[name_column]
+                                        for name_column in columns
+                                    ]),
+                                    np.array([
+                                        row[name_column]
+                                        for name_column in columns
+                                    ]))),
+                            'class_row': row[class_name],
+                            'class_column': column[class_name]
+                        })
+                        pbar.setValue((all - amount))
+                        amount -= 1
+                    else:
+                        pbar.setValue((all - amount))
+                        amount -= 1
+                        continue
+                results.append(results_row)
+
+            correct = {
+                'Euclidean': {},
+                'Manhattan': {},
+                'Chebyshev': {},
+                'Mahalanobis': {}
+            }
+            for k in range(1, len(data.index.tolist())):
+                for metric in correct.keys():
+                    correct[metric][k] = 0
+                for index, row in enumerate(results):
+                    distance = {}
+                    for metric in row.keys():
+                        if len(row[metric]) == 1:
+                            distance[metric] = []
+                        else:
+                            distance[metric] = row[metric][:-1]
+                        distance[metric].extend([d[metric][index] for i, d in enumerate(results) if i > index])
+                        distance[metric].sort(key=lambda x: x['distance'])
+                        closest = distance[metric][0: min(k, len(distance[metric]))]
+                        counter = Counter([x['class_row'] for x in closest])
+                        y = counter.most_common(1)
+
+                        if y[0][0] == data.iloc[index][class_name]:
+                            correct[metric][k] += 1
+                    pbar.setValue((all - amount))
+                    amount -= 1
+            pbar.hide()
+            df = pd.DataFrame(correct)
+            plt.figure(self.figure_counter)
+            self.figure_counter += 1
+            plt.plot(df)
+            plt.legend(df.columns)
+            # plt.savefig()
+            plt.show()
