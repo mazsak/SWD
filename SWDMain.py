@@ -208,7 +208,7 @@ class SWDMain(QMainWindow):
         if ok:
             bins_amount, ok_amount = QInputDialog.getInt(self, 'Binning', "Enter amount of bins")
             if ok_amount:
-                self.table[f'{column}_binned'] = pd.cut(self.table[column], bins=bins_amount)
+                self.table[f'{column}_binned_{bins_amount}'] = pd.cut(self.table[column], bins=bins_amount)
         self.create_table_ui()
 
     def normalization_action(self):
@@ -229,7 +229,7 @@ class SWDMain(QMainWindow):
             if ok_a:
                 b, ok_b = QInputDialog.getInt(self, 'Right range', "Enter end of range")
                 if ok_b:
-                    self.table[f'{column}_interpolated'] = self.table[column].apply(
+                    self.table[f'{column}_interpolated <{a},{b}>'] = self.table[column].apply(
                         lambda x: np.interp(x, [self.table[column].min(), self.table[column].max()], [a, b])).round(5)
         self.create_table_ui()
 
@@ -367,7 +367,7 @@ class SWDMain(QMainWindow):
             amount, ok_1 = QInputDialog.getInt(self, 'Histogram', "Enter amount of bins")
             if ok_1:
 
-                if x not in self.table.select_dtypes(['object', 'string']).columns:
+                if x not in self.table.select_dtypes(['object', 'string','category']).columns:
                     counts, bins, patches = ax.hist(self.table[x], edgecolor='gray', bins=amount)
                     ax.set_xticks(bins)
                 else:
@@ -600,7 +600,7 @@ class SWDMain(QMainWindow):
                                             QMessageBox.Ok)
 
     def knn_leave_one_out_all_action(self):
-        class_name, ok = QInputDialog.getItem(self, 'Classifier KNN leave-one-out', "Choose class column",
+        class_name, ok = QInputDialog.getItem(self, 'Classifier KNN leave-one-out all', "Choose class column",
                                               [f'{column}' for column in
                                                self.table.columns])
         if ok:
@@ -619,10 +619,11 @@ class SWDMain(QMainWindow):
             columns = data.columns.tolist()
             columns.remove(class_name)
             cov = data[columns].cov().to_numpy()
+            check_inverse = True
             try:
                 inv_covmat = np.linalg.inv(cov)
             except LinAlgError:
-                inv_covmat = cov
+                check_inverse = False
             amount = math.pow(len(data.index.tolist()), 2) * 2
             all = amount
             pbar = QProgressBar(self)
@@ -631,12 +632,19 @@ class SWDMain(QMainWindow):
             pbar.setMaximum(all)
             pbar.show()
             for index, row in enumerate(data.iloc):
-                results_row = {
-                    'Euclidean': [],
-                    'Manhattan': [],
-                    'Chebyshev': [],
-                    'Mahalanobis': []
-                }
+                if check_inverse:
+                    results_row = {
+                        'Euclidean': [],
+                        'Manhattan': [],
+                        'Chebyshev': [],
+                        'Mahalanobis': []
+                    }
+                else:
+                    results_row = {
+                        'Euclidean': [],
+                        'Manhattan': [],
+                        'Chebyshev': []
+                    }
                 for index_second, column in enumerate(data.iloc):
                     if index_second <= index:
                         results_row['Euclidean'].append({
@@ -664,19 +672,9 @@ class SWDMain(QMainWindow):
                             'class_row': row[class_name],
                             'class_column': column[class_name]
                         })
-                        results_row['Mahalanobis'].append({
-                            'distance': np.subtract(
-                                np.array([
-                                    column[name_column]
-                                    for name_column in columns
-                                ]),
-                                np.array([
-                                    row[name_column]
-                                    for name_column in columns
-                                ]))
-                                .T.dot(inv_covmat)
-                                .dot(
-                                np.subtract(
+                        if check_inverse:
+                            results_row['Mahalanobis'].append({
+                                'distance': np.subtract(
                                     np.array([
                                         column[name_column]
                                         for name_column in columns
@@ -684,10 +682,21 @@ class SWDMain(QMainWindow):
                                     np.array([
                                         row[name_column]
                                         for name_column in columns
-                                    ]))),
-                            'class_row': row[class_name],
-                            'class_column': column[class_name]
-                        })
+                                    ]))
+                                    .T.dot(inv_covmat)
+                                    .dot(
+                                    np.subtract(
+                                        np.array([
+                                            column[name_column]
+                                            for name_column in columns
+                                        ]),
+                                        np.array([
+                                            row[name_column]
+                                            for name_column in columns
+                                        ]))),
+                                'class_row': row[class_name],
+                                'class_column': column[class_name]
+                            })
                         pbar.setValue((all - amount))
                         amount -= 1
                     else:
@@ -695,13 +704,19 @@ class SWDMain(QMainWindow):
                         amount -= 1
                         continue
                 results.append(results_row)
-
-            correct = {
-                'Euclidean': {},
-                'Manhattan': {},
-                'Chebyshev': {},
-                'Mahalanobis': {}
-            }
+            if check_inverse:
+                correct = {
+                    'Euclidean': {},
+                    'Manhattan': {},
+                    'Chebyshev': {},
+                    'Mahalanobis': {}
+                }
+            else:
+                correct = {
+                    'Euclidean': {},
+                    'Manhattan': {},
+                    'Chebyshev': {}
+                }
             for k in range(1, len(data.index.tolist())):
                 for metric in correct.keys():
                     correct[metric][k] = 0
@@ -723,6 +738,10 @@ class SWDMain(QMainWindow):
                     pbar.setValue((all - amount))
                     amount -= 1
             pbar.hide()
+            if not check_inverse:
+                QMessageBox.information(self, 'Classifier KNN leave-one-out all',
+                                        "Couldn't get an inverse of covariance matrix, skipping Mahalanobis",
+                                        QMessageBox.Ok)
             df = pd.DataFrame(correct)
             plt.figure(self.figure_counter)
             self.figure_counter += 1
