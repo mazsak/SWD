@@ -10,6 +10,8 @@ from PyQt5.QtWidgets import QMainWindow, QAction, QFileDialog, QMenuBar, QInputD
     QMessageBox, QProgressBar
 from numpy.linalg import LinAlgError
 
+from vector_binary_dialog import VectorBinary
+
 matplotlib.use('Qt5Agg')
 
 
@@ -367,7 +369,7 @@ class SWDMain(QMainWindow):
             amount, ok_1 = QInputDialog.getInt(self, 'Histogram', "Enter amount of bins")
             if ok_1:
 
-                if x not in self.table.select_dtypes(['object', 'string','category']).columns:
+                if x not in self.table.select_dtypes(['object', 'string', 'category']).columns:
                     counts, bins, patches = ax.hist(self.table[x], edgecolor='gray', bins=amount)
                     ax.set_xticks(bins)
                 else:
@@ -391,6 +393,11 @@ class SWDMain(QMainWindow):
         knn_leave_one_out_all.setStatusTip('Exercise KNN leave-one-out for all k and metrics')
         knn_leave_one_out_all.triggered.connect(self.knn_leave_one_out_all_action)
 
+        calculate: QAction = QAction('Calculate binary vector', self)
+        calculate.setShortcut('Ctrl+C')
+        calculate.setStatusTip('Calculate')
+        calculate.triggered.connect(self.calculate_binary_vector_action)
+
         self.statusBar()
 
         menu_bar: QMenuBar = self.menuBar()
@@ -398,6 +405,7 @@ class SWDMain(QMainWindow):
         classifier_menu.addAction(knn)
         classifier_menu.addAction(knn_leave_one_out)
         classifier_menu.addAction(knn_leave_one_out_all)
+        classifier_menu.addAction(calculate)
 
     def knn_action(self):
         class_name, ok = QInputDialog.getItem(self, 'Classifier KNN', "Choose class column",
@@ -749,3 +757,110 @@ class SWDMain(QMainWindow):
             plt.legend(df.columns)
             # plt.savefig()
             plt.show()
+
+    def calculate_binary_vector_action(self):
+        grouping_column = self.basic_table.columns[-1]
+
+        df = self.basic_table.copy()
+        lines_data = []
+        lines = []
+        amount = len(self.basic_table.index)
+        all = amount
+        pbar = QProgressBar(self)
+        pbar.setGeometry(550, 385, 100, 30)
+        pbar.setMinimum(0)
+        pbar.setMaximum(all)
+        pbar.show()
+        counter = 0
+        while not df.empty:
+            directions = []
+            for column in self.table.select_dtypes(['float', 'int']).columns.tolist():
+                if column != grouping_column:
+                    directions.append(
+                        self.search_ranked(df.sort_values(by=[column], ascending=False), column, grouping_column,
+                                           'END'))  # end
+                    directions.append(
+                        self.search_ranked(df.sort_values(by=[column]), column, grouping_column, 'START'))  # start
+            directions.sort(key=lambda e: (e[2], e[1]), reverse=True)
+            direction = directions[0]
+            data = direction[0]
+            if direction[4] == '0':
+                counter += 1
+                print('co')
+            if counter == 7:
+                print('stop')
+            if direction[3] == 'END':
+                value = direction[0][direction[4]].min()
+                data = self.basic_table[self.basic_table[direction[4]] >= value]
+                lines.append({'value': value, 'column': direction[4], 'direction': direction[3]})
+            else:
+                value = direction[0][direction[4]].max()
+                data = self.basic_table[self.basic_table[direction[4]] <= value]
+                lines.append({'value': value, 'column': direction[4], 'direction': direction[3]})
+            lines_data.append(data)
+            df = df.drop(direction[0].index)
+
+            pbar.setValue((all - amount))
+            amount -= len(direction[0].index)
+
+            if len(df.index) == 1:
+                lines.append({'value': value, 'column': direction[4],
+                              'direction': 'END' if direction[3] == 'START' else 'START'})
+                break
+
+        lines_data = lines_data[:-1]
+        vectors = {}
+        for index in self.basic_table.index:
+            for i, line in enumerate(lines_data):
+                name_column = f'vector_{i + 1}'
+                if name_column not in vectors:
+                    vectors[name_column] = []
+                if self.basic_table.index[index] in line.index.tolist():
+                    vectors[name_column].append('1')
+                else:
+                    vectors[name_column].append('0')
+
+        for key, vector in vectors.items():
+            self.table[key] = vector
+        pbar.hide()
+        self.create_table_ui()
+
+        if len(self.basic_table.columns) == 3:
+            dialog = VectorBinary(parent=self, df=self.basic_table, lines=lines)
+            if dialog.exec_():
+                print(f'stop show plot {len(self.basic_table.columns)}')
+            else:
+                print(f'stop {len(self.basic_table.columns)}')
+        else:
+            print(f"stop {len(self.basic_table.columns)}")
+
+    def search_ranked(self, df, column, grouping_column, direction):
+        first_row = df.iloc[0]
+        group = first_row[grouping_column]
+        indexs = []
+        df_group = pd.DataFrame()
+        delete_element = 1
+        for index, row in enumerate(df.index):
+            if df.iloc[index][grouping_column] == group:
+                indexs.append(index)
+            else:
+                for i in indexs:
+                    if df.iloc[index][column] != df.iloc[i][column]:
+                        df_group = df_group.append(df.iloc[i])
+                if df_group.empty:
+                    delete_element = 0
+                    df_group = df.loc[df[column] == df.iloc[index][column]]
+                    group = Counter(df_group[grouping_column]).most_common(1)[0][0]
+
+                    indexs = []
+                    for index, row in enumerate(df.index):
+                        if df.index[index] not in df_group.index.tolist():
+                            if df.iloc[index][grouping_column] == group:
+                                indexs.append(index)
+                            else:
+                                for i in indexs:
+                                    if df.iloc[index][column] != df.iloc[i][column]:
+                                        df_group = df_group.append(df.iloc[i])
+                                break
+                break
+        return df_group, len(df_group.index.tolist()), delete_element, direction, column
