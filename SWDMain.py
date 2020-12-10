@@ -7,9 +7,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PyQt5.QtWidgets import QMainWindow, QAction, QFileDialog, QMenuBar, QInputDialog, QTableWidget, QTableWidgetItem, \
-    QMessageBox, QProgressBar
+    QMessageBox, QProgressBar, QMenu
 from numpy.linalg import LinAlgError
 
+import distance_function
+from k_mean_dialog import KMeanDialog
+from similarity import Similarity
 from vector_binary_dialog import VectorBinary
 
 matplotlib.use('Qt5Agg')
@@ -33,6 +36,8 @@ class SWDMain(QMainWindow):
         self.basic_table: pd.DataFrame = pd.DataFrame()
         self.table_ui: QTableWidget = QTableWidget()
         self.figure_counter = 0
+        self.lines = []
+        self.vectors_list = []
 
         self.init_ui()
 
@@ -45,9 +50,8 @@ class SWDMain(QMainWindow):
         self.show()
 
     def init_layout(self):
-        self.layout().addWidget(self.table_ui)
+        self.setCentralWidget(self.table_ui)
         self.table_ui.resizeColumnsToContents()
-        self.table_ui.move(0, 20)
         self.table_ui.setMinimumSize(1200, 800)
 
     def default_settings(self):
@@ -135,7 +139,6 @@ class SWDMain(QMainWindow):
         for index, column in enumerate(self.table.columns):
             for row in self.table.index:
                 self.table_ui.setItem(row, index, QTableWidgetItem(str(self.table.at[row, column])))
-        self.table_ui.move(0, 20)
 
     def init_update(self):
         change_text_to_digit: QAction = QAction('Change text to digit', self)
@@ -190,9 +193,14 @@ class SWDMain(QMainWindow):
         interpolate.triggered.connect(self.interpolate_action)
 
         selected_min_max: QAction = QAction('Selected MIN/MAX', self)
-        selected_min_max.setShortcut('Ctrl+M')
+        selected_min_max.setShortcut('Ctrl+X')
         selected_min_max.setStatusTip('Selected data')
         selected_min_max.triggered.connect(self.selected_min_max_action)
+
+        similarity: QAction = QAction('Similarity', self)
+        similarity.setShortcut('Ctrl+M')
+        similarity.setStatusTip('Similarity')
+        similarity.triggered.connect(self.similarity_action)
 
         self.statusBar()
 
@@ -202,6 +210,7 @@ class SWDMain(QMainWindow):
         action.addAction(normalization)
         action.addAction(interpolate)
         action.addAction(selected_min_max)
+        action.addAction(similarity)
 
     def binning_action(self):
         column, ok = QInputDialog.getItem(self, 'Binning', "Choose column",
@@ -270,6 +279,14 @@ class SWDMain(QMainWindow):
                 self.max_table.move(0, 0)
                 self.max_table.setWindowTitle(f'Max table({percent}%)')
                 self.max_table.show()
+
+    def similarity_action(self):
+        dialog = Similarity(parent=self, df=self.table)
+        if dialog.exec_():
+            res = dialog.execute()
+            QMessageBox.information(self, f'Similarity: {dialog.method}',
+                                    f'Columns {dialog.first_column} and {dialog.second_column} have a similarity value of {res}',
+                                    QMessageBox.Ok)
 
     def init_plots(self) -> None:
         plot_2D: QAction = QAction('Plot 2D', self)
@@ -378,7 +395,7 @@ class SWDMain(QMainWindow):
                 plt.show()
 
     def init_classifier(self):
-        knn: QAction = QAction('KNN', self)
+        knn: QAction = QAction('Calculate', self)
         knn.setShortcut('Ctrl+K')
         knn.setStatusTip('Exercise KNN')
         knn.triggered.connect(self.knn_action)
@@ -393,19 +410,40 @@ class SWDMain(QMainWindow):
         knn_leave_one_out_all.setStatusTip('Exercise KNN leave-one-out for all k and metrics')
         knn_leave_one_out_all.triggered.connect(self.knn_leave_one_out_all_action)
 
-        calculate: QAction = QAction('Calculate binary vector', self)
+        knn_menu = QMenu('KNN', self)
+        knn_menu.addAction(knn)
+        knn_menu.addAction(knn_leave_one_out)
+        knn_menu.addAction(knn_leave_one_out_all)
+
+        calculate: QAction = QAction('Calculate', self)
         calculate.setShortcut('Ctrl+C')
         calculate.setStatusTip('Calculate')
         calculate.triggered.connect(self.calculate_binary_vector_action)
+
+        classify: QAction = QAction('Classify', self)
+        classify.setShortcut('Ctrl+Y')
+        classify.setStatusTip('Classify')
+        classify.triggered.connect(self.classify_action)
+
+        binary_vector_menu = QMenu('Calculate binary vector', self)
+        binary_vector_menu.addAction(calculate)
+        binary_vector_menu.addAction(classify)
+
+        k_mean: QAction = QAction('Calculate', self)
+        k_mean.setShortcut('Ctrl+S')
+        k_mean.setStatusTip('Exercise K-mean')
+        k_mean.triggered.connect(self.k_mean_action)
+
+        k_mean_menu = QMenu('K-mean', self)
+        k_mean_menu.addAction(k_mean)
 
         self.statusBar()
 
         menu_bar: QMenuBar = self.menuBar()
         classifier_menu = menu_bar.addMenu('&Classifier')
-        classifier_menu.addAction(knn)
-        classifier_menu.addAction(knn_leave_one_out)
-        classifier_menu.addAction(knn_leave_one_out_all)
-        classifier_menu.addAction(calculate)
+        classifier_menu.addMenu(knn_menu)
+        classifier_menu.addMenu(k_mean_menu)
+        classifier_menu.addMenu(binary_vector_menu)
 
     def knn_action(self):
         class_name, ok = QInputDialog.getItem(self, 'Classifier KNN', "Choose class column",
@@ -438,53 +476,10 @@ class SWDMain(QMainWindow):
 
                 if go:
                     if ok_metric:
-                        y = self.__calculate_distance(k, metric, class_name, row, self.table)
+                        y = distance_function.calculate_distance(k, metric, class_name, row, self.table)
                         QMessageBox.information(self, 'KNN Classification',
                                                 f'The item has been classified using {metric} metric as {y} for parameters k={k}, class={class_name}, row_info={row}',
                                                 QMessageBox.Ok)
-
-    def __calculate_distance(self, k, metric, class_name, new_row, data):
-        for column in data.select_dtypes(['object', 'string']).columns:
-            if column != class_name:
-                values: List[str] = list(set(data[column].values))
-                encoded_values = {x: i for i, x in enumerate(values)}
-                data[column] = data[column].map(encoded_values)
-
-        if metric == 'Euclidean':
-            distance = [{'distance': math.sqrt(
-                sum([math.pow(row[column_name] - new_row[column_name], 2) for column_name in data.columns.tolist()
-                     if
-                     column_name != class_name])), 'y': row[class_name]} for
-                row in data.iloc]
-        elif metric == 'Manhattan':
-            distance = [{'distance':
-                             sum([abs(row[column_name] - new_row[column_name]) for column_name in
-                                  data.columns.tolist()
-                                  if
-                                  column_name != class_name]), 'y': row[class_name]} for
-                        row in data.iloc]
-        elif metric == 'Chebyshev':
-            distance = [{'distance': max(
-                [abs(row[column_name] - new_row[column_name]) for column_name in data.columns.tolist()
-                 if
-                 column_name != class_name]), 'y': row[class_name]} for
-                row in data.iloc]
-        elif metric == 'Mahalanobis':
-            columns = data.columns.tolist()
-            columns.remove(class_name)
-            cov = data[columns].cov().to_numpy()
-            inv_covmat = np.linalg.inv(cov)
-            distance = [{'distance': np.subtract(np.array(list(new_row.values())), np.array(
-                [row[name_column] for name_column in data.columns.tolist() if name_column != class_name])).T.dot(
-                inv_covmat).dot(np.subtract(np.array(list(new_row.values())), np.array(
-                [row[name_column] for name_column in data.columns.tolist() if name_column != class_name]))),
-                         'y': row[class_name]} for row in data.iloc]
-        distance.sort(key=lambda x: x['distance'])
-        closest = distance[0: min(k, len(distance))]
-        counter = Counter([x['y'] for x in closest])
-        y = counter.most_common(1)
-
-        return y[0][0]
 
     def knn_leave_one_out_action(self):
         data = self.basic_table.copy()
@@ -758,12 +753,18 @@ class SWDMain(QMainWindow):
             # plt.savefig()
             plt.show()
 
+    def k_mean_action(self):
+        dialog = KMeanDialog(parent=self, name_columns=self.basic_table.columns.tolist(), df=self.basic_table)
+        if dialog.exec_():
+            self.table[f'k_mean_class_{dialog.metric}'] = dialog.k_mean()
+            self.create_table_ui()
+
     def calculate_binary_vector_action(self):
         grouping_column = self.basic_table.columns[-1]
 
         df = self.basic_table.copy()
         lines_data = []
-        lines = []
+        self.lines = []
         amount = len(self.basic_table.index)
         all = amount
         pbar = QProgressBar(self)
@@ -771,6 +772,7 @@ class SWDMain(QMainWindow):
         pbar.setMinimum(0)
         pbar.setMaximum(all)
         pbar.show()
+        omitted_rows = 0
         counter = 0
         while not df.empty:
             directions = []
@@ -783,7 +785,7 @@ class SWDMain(QMainWindow):
                         self.search_ranked(df.sort_values(by=[column]), column, grouping_column, 'START'))  # start
             directions.sort(key=lambda e: (e[2], e[1]), reverse=True)
             direction = directions[0]
-            data = direction[0]
+            omitted_rows += direction[5]
             if direction[4] == '0':
                 counter += 1
                 print('co')
@@ -792,11 +794,11 @@ class SWDMain(QMainWindow):
             if direction[3] == 'END':
                 value = direction[0][direction[4]].min()
                 data = self.basic_table[self.basic_table[direction[4]] >= value]
-                lines.append({'value': value, 'column': direction[4], 'direction': direction[3]})
+                self.lines.append({'value': value, 'column': direction[4], 'direction': direction[3]})
             else:
                 value = direction[0][direction[4]].max()
                 data = self.basic_table[self.basic_table[direction[4]] <= value]
-                lines.append({'value': value, 'column': direction[4], 'direction': direction[3]})
+                self.lines.append({'value': value, 'column': direction[4], 'direction': direction[3]})
             lines_data.append(data)
             df = df.drop(direction[0].index)
 
@@ -804,21 +806,26 @@ class SWDMain(QMainWindow):
             amount -= len(direction[0].index)
 
             if len(df.index) == 1:
-                lines.append({'value': value, 'column': direction[4],
-                              'direction': 'END' if direction[3] == 'START' else 'START'})
+                self.lines.append({'value': value, 'column': direction[4],
+                                   'direction': 'END' if direction[3] == 'START' else 'START'})
                 break
 
         lines_data = lines_data[:-1]
         vectors = {}
+        self.vectors_list = []
         for index in self.basic_table.index:
+            vector = []
             for i, line in enumerate(lines_data):
                 name_column = f'vector_{i + 1}'
                 if name_column not in vectors:
                     vectors[name_column] = []
                 if self.basic_table.index[index] in line.index.tolist():
                     vectors[name_column].append('1')
+                    vector.append('1')
                 else:
                     vectors[name_column].append('0')
+                    vector.append('0')
+            self.vectors_list.append(vector)
 
         for key, vector in vectors.items():
             self.table[key] = vector
@@ -826,7 +833,7 @@ class SWDMain(QMainWindow):
         self.create_table_ui()
 
         if len(self.basic_table.columns) == 3:
-            dialog = VectorBinary(parent=self, df=self.basic_table, lines=lines)
+            dialog = VectorBinary(parent=self, df=self.basic_table, lines=self.lines)
             if dialog.exec_():
                 print(f'stop show plot {len(self.basic_table.columns)}')
             else:
@@ -834,12 +841,17 @@ class SWDMain(QMainWindow):
         else:
             print(f"stop {len(self.basic_table.columns)}")
 
+        QMessageBox.information(self, 'Information',
+                                f'Dropped {omitted_rows} rows, created {len(lines_data)} vectors',
+                                QMessageBox.Ok)
+
     def search_ranked(self, df, column, grouping_column, direction):
         first_row = df.iloc[0]
         group = first_row[grouping_column]
         indexs = []
         df_group = pd.DataFrame()
         delete_element = 1
+        dropped_amount = 0
         for index, row in enumerate(df.index):
             if df.iloc[index][grouping_column] == group:
                 indexs.append(index)
@@ -850,7 +862,9 @@ class SWDMain(QMainWindow):
                 if df_group.empty:
                     delete_element = 0
                     df_group = df.loc[df[column] == df.iloc[index][column]]
-                    group = Counter(df_group[grouping_column]).most_common(1)[0][0]
+                    counter = Counter(df_group[grouping_column])
+                    group = counter.most_common(1)[0][0]
+                    dropped_amount = len(df_group[grouping_column])  - counter.most_common(1)[0][1]
 
                     indexs = []
                     for index, row in enumerate(df.index):
@@ -863,4 +877,54 @@ class SWDMain(QMainWindow):
                                         df_group = df_group.append(df.iloc[i])
                                 break
                 break
-        return df_group, len(df_group.index.tolist()), delete_element, direction, column
+        return df_group, len(df_group.index.tolist()), delete_element, direction, column, dropped_amount
+
+    def classify_action(self):
+        class_name, ok = QInputDialog.getItem(self, 'Classifier KNN', "Choose class column",
+                                              [f'{column}' for column in
+                                               self.basic_table.columns])
+        if ok:
+            go = True
+            row = {}
+            for name in self.basic_table.columns.tolist():
+                if name != class_name:
+                    if self.table[name].dtypes in ['float', 'int']:
+                        data, ok_data = QInputDialog.getDouble(self, 'Data', f'Enter {name} column')
+                        if not ok_data:
+                            go = False
+                            break
+                        else:
+                            row[name] = data
+                    else:
+                        data, ok_data = QInputDialog.getText(self, 'Data', f'Enter {name} column')
+                        if not ok_data:
+                            go = False
+                            break
+                        else:
+                            row[name] = data
+
+            if go:
+                vector = []
+                for line in self.lines:
+                    if line['direction'] == 'END':
+                        if line['value'] <= row[line['column']]:
+                            vector.append("1")
+                        else:
+                            vector.append("0")
+                    else:
+                        if line['value'] >= row[line['column']]:
+                            vector.append("1")
+                        else:
+                            vector.append("0")
+                vector = vector[:-1]
+                found_index = 0
+                for i, vec in enumerate(self.vectors_list):
+                    if vector == vec:
+                        found_index = i
+                        break
+
+                QMessageBox.information(self, 'Classification',
+                                        f'Binary vector for an object: {row} equals {vector}, class: {self.basic_table.iloc[found_index][class_name]}',
+                                        QMessageBox.Ok)
+
+# self.lines.append({'value': value, 'column': direction[4], 'direction': direction[3]})
