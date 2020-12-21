@@ -880,7 +880,7 @@ class SWDMain(QMainWindow):
         return df_group, len(df_group.index.tolist()), delete_element, direction, column, dropped_amount
 
     def classify_action(self):
-        class_name, ok = QInputDialog.getItem(self, 'Classifier KNN', "Choose class column",
+        class_name, ok = QInputDialog.getItem(self, 'Classifier', "Choose class column",
                                               [f'{column}' for column in
                                                self.basic_table.columns])
         if ok:

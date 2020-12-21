@@ -84,7 +84,10 @@ class Similarity(QDialog):
     def __jaccard(self):
         list1 = list(self.df[self.first_column])
         list2 = list(self.df[self.second_column])
-        intersection = len(list(set(list1).intersection(list2)))
+        intersection = 0
+        for i, item in enumerate(list1):
+            if list1[i] == list2[i]:
+                intersection += 1
         union = (len(list1) + len(list2)) - intersection
         return float(intersection) / union
 
