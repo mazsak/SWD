@@ -1,6 +1,7 @@
 import pandas as pd
 from PyQt5.QtGui import QIntValidator
-from PyQt5.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout, QComboBox, QHBoxLayout, QLabel, QWidget, QLineEdit
+from PyQt5.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout, QComboBox, QHBoxLayout, QLabel, QWidget, QLineEdit, \
+    QMessageBox
 
 import distance_function
 
@@ -76,13 +77,30 @@ class KMeanDialog(QDialog):
 
     def k_mean(self):
         k = int(self.k_field.text())
-        centroid = self.df.sample(n=k)
+        list_elements_class_name = self.df[self.class_name].tolist()
+        number_of_different_elements = len(set(list_elements_class_name))
+        list_different_elements = []
+        centroid = pd.DataFrame()
+        for element in list_elements_class_name:
+            if element not in list_different_elements:
+                list_different_elements.append(element)
+
+                if len(list_different_elements) == number_of_different_elements:
+                    break
+        for number in range(k):
+            cen = self.df[self.df[self.class_name] == list_different_elements[number % number_of_different_elements]].sample(n=1)
+            while cen.index.tolist()[0] in centroid.index.tolist():
+                cen = self.df[
+                    self.df[self.class_name] == list_different_elements[number % number_of_different_elements]].sample(
+                    n=1)
+            centroid = centroid.append(cen)
         while True:
             centroid_temp = centroid.copy()
             distance = []
             classes = [[] for i in range(k)]
             for index, c in enumerate(centroid.index):
-                row = {column: centroid.iloc[index][column] for column in self.df.columns.tolist() if column != self.class_name}
+                row = {column: centroid.iloc[index][column] for column in self.df.columns.tolist() if
+                       column != self.class_name}
                 if self.metric == 'Euclidean':
                     distance.append(distance_function.distance_euclidean(self.class_name, self.df, row))
                 elif self.metric == 'Manhattan':
@@ -113,4 +131,13 @@ class KMeanDialog(QDialog):
                     for group, c in enumerate(classes):
                         if index in c:
                             response.append(group + 1)
+
+                list1 = [list_different_elements.index(name) + 1 for name in self.df[self.class_name].tolist()]
+                similarity = 0
+                for i, item in enumerate(list1):
+                    if list1[i] == response[i]:
+                        similarity += 1
+                QMessageBox.information(self, 'Information k-mean',
+                                        f'Correctly classified {similarity} of {len(list1)} metric {self.metric}',
+                                        QMessageBox.Ok)
                 return response

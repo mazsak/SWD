@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import QMainWindow, QAction, QFileDialog, QMenuBar, QInputD
 from numpy.linalg import LinAlgError
 
 import distance_function
+from export import Export
 from k_mean_dialog import KMeanDialog
 from similarity import Similarity
 from vector_binary_dialog import VectorBinary
@@ -76,12 +77,18 @@ class SWDMain(QMainWindow):
         reload_file.setStatusTip('Reloading file')
         reload_file.triggered.connect(self.reload_file_action)
 
+        export_file: QAction = QAction('Export data', self)
+        export_file.setShortcut('Ctrl+E')
+        export_file.setStatusTip('Reloading file')
+        export_file.triggered.connect(self.export_file_action)
+
         self.statusBar()
 
         menu_bar: QMenuBar = self.menuBar()
         file_menu = menu_bar.addMenu('&File')
         file_menu.addAction(load_file)
         file_menu.addAction(reload_file)
+        file_menu.addAction(export_file)
 
     def reload_file_action(self):
         self.table = self.basic_table.copy()
@@ -132,6 +139,11 @@ class SWDMain(QMainWindow):
             self.basic_table = self.table.copy()
             self.create_table_ui()
 
+    def export_file_action(self):
+        dialog = Export(parent=self, df=self.basic_table)
+        if dialog.exec_():
+            dialog.export_to_file()
+
     def create_table_ui(self):
         self.table_ui.setRowCount(len(self.table.index))
         self.table_ui.setColumnCount(len(self.table.columns))
@@ -172,8 +184,16 @@ class SWDMain(QMainWindow):
             self.table[f'{column_name}_encoded'] = self.table[column_name].map(encoded_values)
         else:
             # order
-            values: List[str] = list(set(self.table[column_name].values))
-            encoded_values = {x: i for i, x in enumerate(values)}
+            list_elements_class_name = self.basic_table[column_name].tolist()
+            number_of_different_elements = len(set(list_elements_class_name))
+            values = []
+            for element in list_elements_class_name:
+                if element not in values:
+                    values.append(element)
+
+                    if len(values) == number_of_different_elements:
+                        break
+            encoded_values = {x: i+1 for i, x in enumerate(values)}
             self.table[f'{column_name}_encoded'] = self.table[column_name].map(encoded_values)
 
     def init_action(self):
@@ -785,12 +805,15 @@ class SWDMain(QMainWindow):
                         self.search_ranked(df.sort_values(by=[column]), column, grouping_column, 'START'))  # start
             directions.sort(key=lambda e: (e[2], e[1]), reverse=True)
             direction = directions[0]
+            if direction[0].empty:
+                break
             omitted_rows += direction[5]
             if direction[4] == '0':
                 counter += 1
-                print('co')
+                # print('co')
             if counter == 7:
-                print('stop')
+                pass
+                # print('stop')
             if direction[3] == 'END':
                 value = direction[0][direction[4]].min()
                 data = self.basic_table[self.basic_table[direction[4]] >= value]
@@ -810,7 +833,7 @@ class SWDMain(QMainWindow):
                                    'direction': 'END' if direction[3] == 'START' else 'START'})
                 break
 
-        lines_data = lines_data[:-1]
+        # lines_data = lines_data[:-1]
         vectors = {}
         self.vectors_list = []
         for index in self.basic_table.index:
