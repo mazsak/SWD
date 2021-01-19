@@ -140,7 +140,7 @@ class SWDMain(QMainWindow):
             self.create_table_ui()
 
     def export_file_action(self):
-        dialog = Export(parent=self, df=self.basic_table)
+        dialog = Export(parent=self, df=self.table)
         if dialog.exec_():
             dialog.export_to_file()
 
@@ -193,7 +193,7 @@ class SWDMain(QMainWindow):
 
                     if len(values) == number_of_different_elements:
                         break
-            encoded_values = {x: i+1 for i, x in enumerate(values)}
+            encoded_values = {x: i + 1 for i, x in enumerate(values)}
             self.table[f'{column_name}_encoded'] = self.table[column_name].map(encoded_values)
 
     def init_action(self):
@@ -781,7 +781,7 @@ class SWDMain(QMainWindow):
 
     def calculate_binary_vector_action(self):
         grouping_column = self.basic_table.columns[-1]
-
+        indices_to_drop = []
         df = self.basic_table.copy()
         lines_data = []
         self.lines = []
@@ -805,6 +805,8 @@ class SWDMain(QMainWindow):
                         self.search_ranked(df.sort_values(by=[column]), column, grouping_column, 'START'))  # start
             directions.sort(key=lambda e: (e[2], e[1]), reverse=True)
             direction = directions[0]
+            if direction[6] is not None:
+                indices_to_drop.extend(direction[6])
             if direction[0].empty:
                 break
             omitted_rows += direction[5]
@@ -852,6 +854,11 @@ class SWDMain(QMainWindow):
 
         for key, vector in vectors.items():
             self.table[key] = vector
+        if indices_to_drop:
+            for i in indices_to_drop:
+                self.table.drop(i, inplace=True)
+            self.table.reset_index(inplace=True)
+            self.table.drop('index',axis=1,inplace=True)
         pbar.hide()
         self.create_table_ui()
 
@@ -865,11 +872,12 @@ class SWDMain(QMainWindow):
             print(f"stop {len(self.basic_table.columns)}")
 
         QMessageBox.information(self, 'Information',
-                                f'Dropped {omitted_rows} rows, created {len(lines_data)} vectors',
+                                f'Dropped {omitted_rows} rows, created {len(lines_data)} vectors. \nIf you would like to do that again, first reset the table and apply your changes again.',
                                 QMessageBox.Ok)
 
     def search_ranked(self, df, column, grouping_column, direction):
         first_row = df.iloc[0]
+        dropped_indices = None
         group = first_row[grouping_column]
         indexs = []
         df_group = pd.DataFrame()
@@ -883,12 +891,17 @@ class SWDMain(QMainWindow):
                     if df.iloc[index][column] != df.iloc[i][column]:
                         df_group = df_group.append(df.iloc[i])
                 if df_group.empty:
+                    if dropped_indices is None:
+                        dropped_indices = []
                     delete_element = 0
                     df_group = df.loc[df[column] == df.iloc[index][column]]
                     counter = Counter(df_group[grouping_column])
                     group = counter.most_common(1)[0][0]
-                    dropped_amount = len(df_group[grouping_column])  - counter.most_common(1)[0][1]
-
+                    dropped_amount = len(df_group[grouping_column]) - counter.most_common(1)[0][1]
+                    dropped_classes = [x[0] for x in counter.most_common(len(df_group[grouping_column]))[1:]]
+                    for data_class in dropped_classes:
+                        dropped_indices.extend(
+                            df_group.loc[df_group[df_group.columns.to_list()[-1]] == data_class].index.to_list())
                     indexs = []
                     for index, row in enumerate(df.index):
                         if df.index[index] not in df_group.index.tolist():
@@ -900,7 +913,8 @@ class SWDMain(QMainWindow):
                                         df_group = df_group.append(df.iloc[i])
                                 break
                 break
-        return df_group, len(df_group.index.tolist()), delete_element, direction, column, dropped_amount
+        return df_group, len(
+            df_group.index.tolist()), delete_element, direction, column, dropped_amount, dropped_indices
 
     def classify_action(self):
         class_name, ok = QInputDialog.getItem(self, 'Classifier', "Choose class column",

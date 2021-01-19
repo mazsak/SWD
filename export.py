@@ -30,7 +30,7 @@ class Export(QDialog):
 
     def __add_columns(self):
         self.selected_columns = [e.text() for e in self.listwidget.selectedItems()]
-        self.selected.setText(f'Export columns: {", ".join(self.selected_columns)}')
+        self.selected.setText(f'Export columns')
 
     def __init_buttons(self):
         buttons = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
