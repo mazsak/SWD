@@ -1,6 +1,11 @@
+from collections import Counter
+
 import pandas as pd
 from PyQt5.QtGui import QIntValidator
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QWidget, QDialogButtonBox, QLineEdit
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QWidget, QDialogButtonBox, QLineEdit, \
+    QMessageBox
+
+from decision_tree.tree import Tree
 
 
 class DecisionTree(QDialog):
@@ -59,5 +64,28 @@ class DecisionTree(QDialog):
         bins = int(self.bins_field.text())
         for column in self.df.select_dtypes(['float']).columns:
             if column != self.class_name:
-                self.df[f'{column}_binned_{bins}'] = pd.cut(self.table[column], bins=bins)
-        print("tu dalej napisz cos")
+                self.df[f'{column}_binned_{bins}'] = pd.cut(self.df[column], bins=bins)
+        tree = Tree(self.df, self.class_name)
+        tree.calculate()
+        tree.to_txt()
+        QMessageBox.information(self, 'Generated tree',
+                                f'The tree has been generated and exported to tree.json and tree.txt',
+                                QMessageBox.Ok)
+
+    def leave_one_out(self):
+        data: pd.DataFrame = self.df.copy()
+        bins = int(self.bins_field.text())
+        predictions = []
+        for i, row in enumerate(data.iloc):
+            temp_data = data.drop(i)
+            for column in data.select_dtypes(['float']).columns:
+                if column != self.class_name:
+                    temp_data[f'{column}_binned_{bins}'] = pd.cut(data[column], bins=bins)
+            tree = Tree(temp_data, self.class_name)
+            tree.calculate()
+            predictions.append(tree.classify(row))
+        counter = Counter([pred[2] for pred in predictions])
+        QMessageBox.information(self, 'Leave One Out',
+                                f'Clasification for leave one out: '
+                                f'{round((counter[True] / sum(counter.values())) * 100, 2)}%',
+                                QMessageBox.Ok)

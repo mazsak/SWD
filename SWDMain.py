@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import QMainWindow, QAction, QFileDialog, QMenuBar, QInputD
 from numpy.linalg import LinAlgError
 
 import distance_function
+from decision_tree_dialog import DecisionTree
 from export import Export
 from k_mean_dialog import KMeanDialog
 from similarity import Similarity
@@ -859,7 +860,7 @@ class SWDMain(QMainWindow):
             for i in indices_to_drop:
                 self.table.drop(i, inplace=True)
             self.table.reset_index(inplace=True)
-            self.table.drop('index',axis=1,inplace=True)
+            self.table.drop('index', axis=1, inplace=True)
         pbar.hide()
         self.create_table_ui()
 
@@ -966,25 +967,30 @@ class SWDMain(QMainWindow):
                                         QMessageBox.Ok)
 
     def init_decision_tree(self) -> None:
-        load_file: QAction = QAction('Open file', self)
-        load_file.setShortcut('Ctrl+O')
-        load_file.setStatusTip('Loading file')
-        load_file.triggered.connect(self.load_file_action)
+        generate_tree: QAction = QAction('Generate tree', self)
+        # load_file.setShortcut('Ctrl+O')
+        generate_tree.setStatusTip('Generate tree')
+        generate_tree.triggered.connect(self.generate_tree_action)
 
-        reload_file: QAction = QAction('Reload file', self)
-        reload_file.setShortcut('Ctrl+R')
-        reload_file.setStatusTip('Reloading file')
-        reload_file.triggered.connect(self.reload_file_action)
-
-        export_file: QAction = QAction('Export data', self)
-        export_file.setShortcut('Ctrl+E')
-        export_file.setStatusTip('Reloading file')
-        export_file.triggered.connect(self.export_file_action)
+        tree_leave_one_out: QAction = QAction('Leave one out', self)
+        tree_leave_one_out.setStatusTip('Leave one out')
+        tree_leave_one_out.triggered.connect(self.tree_leave_one_out_action)
 
         self.statusBar()
 
         menu_bar: QMenuBar = self.menuBar()
         decision_menu = menu_bar.addMenu('&Decision tree')
-        decision_menu.addAction(load_file)
-        decision_menu.addAction(reload_file)
-        decision_menu.addAction(export_file)
+        decision_menu.addAction(generate_tree)
+        decision_menu.addAction(tree_leave_one_out)
+
+    def generate_tree_action(self) -> None:
+        data = self.table.copy()
+        dialog = DecisionTree(parent=self, df=data)
+        if dialog.exec_():
+            dialog.calculate()
+
+    def tree_leave_one_out_action(self):
+        data = self.table.copy()
+        dialog = DecisionTree(parent=self, df=data)
+        if dialog.exec_():
+            dialog.leave_one_out()
